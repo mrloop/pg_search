@@ -13,14 +13,27 @@ describe PgSearch::Multisearch do
       include PgSearch
     end
   end
+  with_model :AnotherMultisearchableModel do
+    table do |t|
+      t.string :title
+      t.text :content
+      t.timestamps null: false
+    end
+    model do
+      include PgSearch
+    end
+
+  end
 
   let(:model) { MultisearchableModel }
+  let(:another_model) { AnotherMultisearchableModel }
   let(:connection) { model.connection }
   let(:documents) { double(:documents) }
 
   describe ".rebuild" do
     before do
       model.multisearchable :against => :title
+      another_model.multisearchable :against => :title
     end
 
     it "should operate inside a transaction" do
@@ -30,25 +43,19 @@ describe PgSearch::Multisearch do
     end
 
     describe "cleaning up search documents for this model" do
+      let(:now){ DateTime.now }
       before do
-        connection.execute <<-SQL.strip_heredoc
-          INSERT INTO pg_search_documents
-            (searchable_type, searchable_id, content, created_at, updated_at)
-            VALUES
-            ('#{model.name}', 123, 'foo', now(), now());
-          INSERT INTO pg_search_documents
-            (searchable_type, searchable_id, content, created_at, updated_at)
-            VALUES
-            ('Bar', 123, 'foo', now(), now());
-        SQL
+        AnotherMultisearchableModel.create!(content: 'Bar')
+        MultisearchableModel.create!(content: 'foo')
         expect(PgSearch::Document.count).to eq(2)
       end
 
       context "when clean_up is not passed" do
         it "should delete the document for the model" do
+          old_doc = model.first.pg_search_document
           PgSearch::Multisearch.rebuild(model)
-          expect(PgSearch::Document.count).to eq(1)
-          expect(PgSearch::Document.first.searchable_type).to eq("Bar")
+          expect(PgSearch::Document.count).to eq(2)
+          expect(old_doc.id).to_not eq (model.first.pg_search_document.id)
         end
       end
 
@@ -56,9 +63,10 @@ describe PgSearch::Multisearch do
         let(:clean_up) { true }
 
         it "should delete the document for the model" do
+          old_doc = model.first.pg_search_document
           PgSearch::Multisearch.rebuild(model, clean_up)
-          expect(PgSearch::Document.count).to eq(1)
-          expect(PgSearch::Document.first.searchable_type).to eq("Bar")
+          expect(PgSearch::Document.count).to eq(2)
+          expect(old_doc.id).to_not eq (model.first.pg_search_document.id)
         end
       end
 
@@ -66,8 +74,9 @@ describe PgSearch::Multisearch do
         let(:clean_up) { false }
 
         it "should not delete the document for the model" do
+          old_doc = model.first.pg_search_document
           PgSearch::Multisearch.rebuild(model, clean_up)
-          expect(PgSearch::Document.count).to eq(2)
+          expect(old_doc.id).to eq (model.first.pg_search_document.id)
         end
       end
 
